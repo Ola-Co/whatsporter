@@ -257,7 +257,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
               updateConversation(from, { step: "WAIT_SENDER_DETAILS" });
               await sendText({
                 to: from,
-                body: "🚚 Let's book your delivery!\nPlease send:\nSender Name, Sender Phone, Recipient Name, Recipient Phone, Drop-off Address\n(separated by commas)",
+                body: "🚚 Let's book your delivery!\nPlease send:\nSender Name; Sender Phone; Recipient Name; Recipient Phone; Drop-off Address\n(separated by semi-colon)",
                 phoneNumberId,
               });
               continue;
