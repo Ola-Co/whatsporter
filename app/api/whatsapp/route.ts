@@ -308,8 +308,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           });
           continue;
         }
-
+        console.log("receivedms ", JSON.stringify(m));
         if (session.step === "WAIT_VEHICLE" && m.type === "interactive") {
+          console.log("receivedms ", JSON.stringify(m));
           const btn = (m.interactive as WAMessageInteractiveButtonReply)
             ?.button_reply;
           if (btn && btn.id.startsWith("veh_")) {
