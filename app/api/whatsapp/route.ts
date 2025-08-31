@@ -243,6 +243,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
         const session = getConversation(from);
         console.log("session details ", JSON.stringify(session));
+        console.log("message ", JSON.stringify(m));
         // Restart command
         if (
           ["start", "book", "delivery"].some((cmd) =>
