@@ -242,7 +242,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         if (!text) continue;
 
         const session = getConversation(from);
-
+        console.log("session details ", JSON.stringify(session));
         // Restart command
         if (
           ["start", "book", "delivery"].some((cmd) =>
@@ -311,20 +311,37 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         console.log("receivedms ", JSON.stringify(m));
         if (session.step === "WAIT_VEHICLE" && m.type === "interactive") {
           console.log("receivedms ", JSON.stringify(m));
-          const btn = (m.interactive as WAMessageInteractiveButtonReply)
-            ?.button_reply;
-          if (btn && btn.id.startsWith("veh_")) {
-            const vehicle = btn.title as VehicleType;
-            updateConversation(from, {
-              step: "WAIT_ORDER_DETAILS",
-              vehicle_type: vehicle,
-            });
+          // const btn = (m.interactive as WAMessageInteractiveButtonReply)
+          //   ?.button_reply;
+          // if (btn && btn.id.startsWith("veh_")) {
+          //   const vehicle = btn.title as VehicleType;
+          //   updateConversation(from, {
+          //     step: "WAIT_ORDER_DETAILS",
+          //     vehicle_type: vehicle,
+          //   });
 
-            await sendText({
-              to: from,
-              body: "📦 Please provide item details and pickup location in format:\nItem Description, Pickup Address",
-              phoneNumberId,
-            });
+          //   await sendText({
+          //     to: from,
+          //     body: "📦 Please provide item details and pickup location in format:\nItem Description, Pickup Address",
+          //     phoneNumberId,
+          //   });
+          // }
+          // continue;
+          if (m.interactive?.type === "button_reply") {
+            const btn = m.interactive.button_reply;
+            if (btn && btn.id.startsWith("veh_")) {
+              const vehicle = btn.title as VehicleType;
+              updateConversation(from, {
+                step: "WAIT_ORDER_DETAILS",
+                vehicle_type: vehicle,
+              });
+
+              await sendText({
+                to: from,
+                body: "📦 Please provide item details and pickup location in format:\nItem Description, Pickup Address",
+                phoneNumberId,
+              });
+            }
           }
           continue;
         }
