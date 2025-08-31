@@ -237,98 +237,145 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       const phoneNumberId = value.metadata?.phone_number_id;
       for (const m of value.messages) {
         const from = m.from;
-        const text = m.text?.body?.trim();
-
-        if (!text) continue;
-
         const session = getConversation(from);
-        console.log("session details ", JSON.stringify(session));
-        console.log("message ", JSON.stringify(m));
-        // Restart command
-        if (
-          ["start", "book", "delivery"].some((cmd) =>
-            text.toLowerCase().includes(cmd)
-          )
-        ) {
-          resetConversation(from);
-          updateConversation(from, { step: "WAIT_SENDER_DETAILS" });
-          await sendText({
-            to: from,
-            body: "🚚 Let's book your delivery!\nPlease send:\nSender Name, Sender Phone, Recipient Name, Recipient Phone, Drop-off Address\n(separated by commas)",
-            phoneNumberId,
-          });
-          continue;
-        }
 
-        // Handle based on step
-        if (session.step === "WAIT_SENDER_DETAILS") {
-          const parts = text.split(",").map((p) => p.trim());
-          if (parts.length < 5) {
+        console.log("📥 Incoming message:", JSON.stringify(m, null, 2));
+        console.log("📌 Session:", JSON.stringify(session));
+
+        // --- TEXT MESSAGES ---
+        if (m.type === "text") {
+          const text = m.text?.body?.trim();
+          if (!text) continue;
+
+          // Restart command
+          if (
+            ["start", "book", "delivery"].some((cmd) =>
+              text.toLowerCase().includes(cmd)
+            )
+          ) {
+            resetConversation(from);
+            updateConversation(from, { step: "WAIT_SENDER_DETAILS" });
             await sendText({
               to: from,
-              body: "⚠️ Please provide all details in format:\nName, Phone, Recipient Name, Recipient Phone, Drop-off Address",
+              body: "🚚 Let's book your delivery!\nPlease send:\nSender Name, Sender Phone, Recipient Name, Recipient Phone, Drop-off Address\n(separated by commas)",
               phoneNumberId,
             });
             continue;
           }
 
-          const [
-            sender_name,
-            sender_phone,
-            recipient_name,
-            recipient_phone,
-            destination_address,
-          ] = parts;
-          if (!isE164(sender_phone) || !isE164(recipient_phone)) {
-            await sendText({
+          // Step: WAIT_SENDER_DETAILS
+          if (session.step === "WAIT_SENDER_DETAILS") {
+            const parts = text.split(",").map((p) => p.trim());
+            if (parts.length < 5) {
+              await sendText({
+                to: from,
+                body: "⚠️ Please provide all details in format:\nName, Phone, Recipient Name, Recipient Phone, Drop-off Address",
+                phoneNumberId,
+              });
+              continue;
+            }
+
+            const [
+              sender_name,
+              sender_phone,
+              recipient_name,
+              recipient_phone,
+              destination_address,
+            ] = parts;
+
+            if (!isE164(sender_phone) || !isE164(recipient_phone)) {
+              await sendText({
+                to: from,
+                body: "📱 Phone numbers must be in E.164 format (e.g., +14155552671). Try again.",
+                phoneNumberId,
+              });
+              continue;
+            }
+
+            updateConversation(from, {
+              step: "WAIT_VEHICLE",
+              sender_name,
+              sender_phone,
+              recipient_name,
+              recipient_phone,
+              destination_address,
+            });
+
+            await sendButtons({
               to: from,
-              body: "📱 Phone numbers must be in E.164 format (e.g., +14155552671). Try again.",
+              body: "Select vehicle type:",
+              buttons: [
+                { id: "veh_bike", title: "Bike" },
+                { id: "veh_car", title: "Car" },
+                { id: "veh_van", title: "Van" },
+              ],
               phoneNumberId,
             });
             continue;
           }
 
-          updateConversation(from, {
-            step: "WAIT_VEHICLE",
-            sender_name,
-            sender_phone,
-            recipient_name,
-            recipient_phone,
-            destination_address,
-          });
+          // Step: WAIT_ORDER_DETAILS
+          if (session.step === "WAIT_ORDER_DETAILS") {
+            const parts = text.split(",").map((p) => p.trim());
+            if (parts.length < 2) {
+              await sendText({
+                to: from,
+                body: "⚠️ Please provide both fields:\nItem Description, Pickup Address",
+                phoneNumberId,
+              });
+              continue;
+            }
 
-          await sendButtons({
-            to: from,
-            body: "Select vehicle type:",
-            buttons: [
-              { id: "veh_bike", title: "Bike" },
-              { id: "veh_car", title: "Car" },
-              { id: "veh_van", title: "Van" },
-            ],
-            phoneNumberId,
-          });
-          continue;
+            const [order_details, pickup_location] = parts;
+            updateConversation(from, {
+              step: "COMPLETE",
+              order_details,
+              pickup_location,
+            });
+
+            // Calculate quote
+            const seconds = await getTravelSeconds(
+              pickup_location,
+              session.destination_address!,
+              process.env.GOOGLE_MAPS_API_KEY ?? ""
+            );
+            const minutes = Math.max(1, Math.ceil(seconds / 60));
+            const price = minutes * 1;
+
+            await sendButtons({
+              to: from,
+              body:
+                `🚚 *Delivery Quote*\n` +
+                `Sender: ${session.sender_name} (${session.sender_phone})\n` +
+                `Recipient: ${session.recipient_name} (${session.recipient_phone})\n` +
+                `Vehicle: ${session.vehicle_type}\n` +
+                `Item: ${order_details}\n` +
+                `From: ${pickup_location}\n` +
+                `To: ${session.destination_address}\n\n` +
+                `⏱️ ETA: ~${minutes} min\n` +
+                `💵 Price: $${price}\n\n` +
+                `Confirm booking?`,
+              buttons: [
+                { id: "confirm_booking", title: "Confirm" },
+                { id: "cancel_booking", title: "Cancel" },
+              ],
+              phoneNumberId,
+            });
+            continue;
+          }
         }
-        console.log("receivedms ", JSON.stringify(m));
-        if (session.step === "WAIT_VEHICLE" && m.type === "interactive") {
-          console.log("receivedms ", JSON.stringify(m));
-          // const btn = (m.interactive as WAMessageInteractiveButtonReply)
-          //   ?.button_reply;
-          // if (btn && btn.id.startsWith("veh_")) {
-          //   const vehicle = btn.title as VehicleType;
-          //   updateConversation(from, {
-          //     step: "WAIT_ORDER_DETAILS",
-          //     vehicle_type: vehicle,
-          //   });
 
-          //   await sendText({
-          //     to: from,
-          //     body: "📦 Please provide item details and pickup location in format:\nItem Description, Pickup Address",
-          //     phoneNumberId,
-          //   });
-          // }
-          // continue;
-          if (m.interactive?.type === "button_reply") {
+        // --- INTERACTIVE MESSAGES ---
+        if (m.type === "interactive") {
+          console.log(
+            "📲 Interactive payload:",
+            JSON.stringify(m.interactive, null, 2)
+          );
+
+          if (
+            session.step === "WAIT_VEHICLE" &&
+            m.interactive?.type === "button_reply"
+          ) {
             const btn = m.interactive.button_reply;
             if (btn && btn.id.startsWith("veh_")) {
               const vehicle = btn.title as VehicleType;
@@ -342,82 +389,36 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
                 body: "📦 Please provide item details and pickup location in format:\nItem Description, Pickup Address",
                 phoneNumberId,
               });
+              continue;
             }
           }
-          continue;
-        }
 
-        if (session.step === "WAIT_ORDER_DETAILS") {
-          const parts = text.split(",").map((p) => p.trim());
-          if (parts.length < 2) {
-            await sendText({
-              to: from,
-              body: "⚠️ Please provide both fields:\nItem Description, Pickup Address",
-              phoneNumberId,
-            });
-            continue;
+          if (
+            session.step === "COMPLETE" &&
+            m.interactive?.type === "button_reply"
+          ) {
+            const btn = m.interactive.button_reply;
+            if (btn?.id === "confirm_booking") {
+              await sendText({
+                to: from,
+                body: "✅ Booking confirmed! We'll assign a porter shortly.",
+                phoneNumberId,
+              });
+              resetConversation(from);
+              continue;
+            } else if (btn?.id === "cancel_booking") {
+              await sendText({
+                to: from,
+                body: "❌ Booking cancelled. Send 'book' to start again.",
+                phoneNumberId,
+              });
+              resetConversation(from);
+              continue;
+            }
           }
-
-          const [order_details, pickup_location] = parts;
-          updateConversation(from, {
-            step: "COMPLETE",
-            order_details,
-            pickup_location,
-          });
-
-          // Calculate quote
-          const seconds = await getTravelSeconds(
-            pickup_location,
-            session.destination_address!,
-            process.env.GOOGLE_MAPS_API_KEY ?? ""
-          );
-          const minutes = Math.max(1, Math.ceil(seconds / 60));
-          const price = minutes * 1;
-
-          await sendButtons({
-            to: from,
-            body:
-              `🚚 *Delivery Quote*\n` +
-              `Sender: ${session.sender_name} (${session.sender_phone})\n` +
-              `Recipient: ${session.recipient_name} (${session.recipient_phone})\n` +
-              `Vehicle: ${session.vehicle_type}\n` +
-              `Item: ${order_details}\n` +
-              `From: ${pickup_location}\n` +
-              `To: ${session.destination_address}\n\n` +
-              `⏱️ ETA: ~${minutes} min\n` +
-              `💵 Price: $${price}\n\n` +
-              `Confirm booking?`,
-            buttons: [
-              { id: "confirm_booking", title: "Confirm" },
-              { id: "cancel_booking", title: "Cancel" },
-            ],
-            phoneNumberId,
-          });
-          continue;
         }
 
-        if (session.step === "COMPLETE" && m.type === "interactive") {
-          const btn = (m.interactive as WAMessageInteractiveButtonReply)
-            ?.button_reply;
-          if (btn?.id === "confirm_booking") {
-            await sendText({
-              to: from,
-              body: "✅ Booking confirmed! We'll assign a porter shortly.",
-              phoneNumberId,
-            });
-            resetConversation(from);
-          } else if (btn?.id === "cancel_booking") {
-            await sendText({
-              to: from,
-              body: "❌ Booking cancelled. Send 'book' to start again.",
-              phoneNumberId,
-            });
-            resetConversation(from);
-          }
-          continue;
-        }
-
-        // Default catch-all
+        // --- DEFAULT FALLBACK ---
         await sendText({
           to: from,
           body: 'Send "book" to start a delivery request.',
