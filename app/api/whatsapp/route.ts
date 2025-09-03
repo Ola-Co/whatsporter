@@ -6,6 +6,7 @@ import { getTravelSeconds } from "@/lib/googleMaps";
 import { sendButtons, sendText } from "@/lib/whatsapphelper";
 import type { VehicleType } from "@/lib/types";
 import {
+  archiveConversation,
   getConversation,
   resetConversation,
   updateConversation,
@@ -63,160 +64,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   return new NextResponse("Forbidden", { status: 403 });
 }
 
-// X-Hub-Signature-256 verification (recommended)
-// function verifySignature(
-//   header: string | null,
-//   rawBody: string,
-//   appSecret: string
-// ): boolean {
-//   if (!header) return false;
-//   const expected =
-//     "sha256=" +
-//     crypto.createHmac("sha256", appSecret).update(rawBody).digest("hex");
-//   const a = Buffer.from(header);
-//   const b = Buffer.from(expected);
-//   if (a.length !== b.length) return false;
-//   return crypto.timingSafeEqual(a, b);
-// }
-
-// --- Webhook Events (POST) ---
-// export async function POST(req: NextRequest): Promise<NextResponse> {
-//   debugger;
-//   const raw = await req.text();
-
-//   // const appSecret = process.env.WHATSAPP_APP_SECRET ?? "";
-//   // const sig = req.headers.get("x-hub-signature-256");
-//   // if (appSecret) {
-//   //   const ok = verifySignature(sig, raw, appSecret);
-//   //   if (!ok) return new NextResponse("Invalid signature", { status: 401 });
-//   // }
-
-//   let payload: WAPayload;
-//   try {
-//     payload = JSON.parse(raw) as WAPayload;
-//   } catch {
-//     return new NextResponse("Bad JSON", { status: 400 });
-//   }
-
-//   const entries = payload.entry ?? [];
-//   for (const e of entries) {
-//     const changes = e.changes ?? [];
-//     for (const ch of changes) {
-//       const value = ch.value;
-//       if (!value?.messages?.length) continue;
-
-//       const phoneNumberId = value.metadata?.phone_number_id; // for sending replies (optional)
-//       for (const m of value.messages) {
-//         const from = m.from;
-
-//         try {
-//           if (m.type === "text") {
-//             const body = m.text?.body?.trim().toLowerCase() ?? "";
-//             if (
-//               body === "start" ||
-//               body.includes("book") ||
-//               body.includes("delivery")
-//             ) {
-//               await sendFlow({
-//                 to: from,
-//                 headerText: "Porter Booking",
-//                 bodyText: "Fill in your delivery details to get a quote.",
-//                 flowId: process.env.WHATSAPP_FLOW_ID ?? "",
-//                 phoneNumberId,
-//               });
-//             } else {
-//               await sendText({
-//                 to: from,
-//                 body: 'Send "book" to start the delivery flow.',
-//                 phoneNumberId,
-//               });
-//             }
-//             continue;
-//           }
-
-//           if (m.type === "interactive" && m.interactive) {
-//             // --- Flow submission path ---
-//             if (
-//               (m.interactive as WAMessageInteractiveFlowReply).type ===
-//               "flow_reply"
-//             ) {
-//               const i = m.interactive as WAMessageInteractiveFlowReply;
-//               const results = i.results ?? i.flow_reply?.results ?? {};
-//               const valid: FlowResults = validateFlowResults(results ?? {});
-
-//               // Google Maps time
-//               const seconds = await getTravelSeconds(
-//                 valid.pickup_location,
-//                 valid.destination_address,
-//                 process.env.GOOGLE_MAPS_API_KEY ?? ""
-//               );
-//               const minutes = Math.max(1, Math.ceil(seconds / 60));
-//               const quote: PriceQuote = {
-//                 seconds,
-//                 minutes,
-//                 amountUsd: minutes * 1,
-//               };
-
-//               // reply with estimate + confirm/cancel
-//               await sendButtons({
-//                 to: from,
-//                 body:
-//                   `🚚 *Delivery Quote*\n` +
-//                   `Sender: ${valid.sender_name} (${valid.sender_phone})\n` +
-//                   `Recipient: ${valid.recipient_name} (${valid.recipient_phone})\n` +
-//                   `Vehicle: ${valid.vehicle_type}\n` +
-//                   `Item: ${valid.order_details}\n` +
-//                   `From: ${valid.pickup_location}\n` +
-//                   `To: ${valid.destination_address}\n\n` +
-//                   `⏱️ ETA: ~${minutes} min\n` +
-//                   `💵 Price: $${quote.amountUsd}\n\n` +
-//                   `Confirm booking?`,
-//                 buttons: [
-//                   { id: "confirm_booking", title: "Confirm" },
-//                   { id: "cancel_booking", title: "Cancel" },
-//                 ],
-//                 phoneNumberId,
-//               });
-//               continue;
-//             }
-
-//             // --- Button reply path ---
-//             if (
-//               (m.interactive as WAMessageInteractiveButtonReply).type ===
-//               "button_reply"
-//             ) {
-//               const btn = (m.interactive as WAMessageInteractiveButtonReply)
-//                 .button_reply;
-//               if (btn.id === "confirm_booking") {
-//                 await sendText({
-//                   to: from,
-//                   body: "✅ Booking confirmed. We'll assign a porter and update you shortly.",
-//                   phoneNumberId,
-//                 });
-//               } else if (btn.id === "cancel_booking") {
-//                 await sendText({
-//                   to: from,
-//                   body: '❌ Booking cancelled. Send "book" to start again.',
-//                   phoneNumberId,
-//                 });
-//               }
-//               continue;
-//             }
-//           }
-//         } catch (err) {
-//           const msg = err instanceof Error ? err.message : "Unexpected error";
-//           await sendText({
-//             to: from,
-//             body: `Sorry, something went wrong: ${msg}`,
-//             phoneNumberId,
-//           });
-//         }
-//       }
-//     }
-//   }
-
-//   return NextResponse.json({ ok: true });
-// }
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const raw = await req.text();
   let payload: WAPayload;
@@ -237,7 +84,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       const phoneNumberId = value.metadata?.phone_number_id;
       for (const m of value.messages) {
         const from = m.from;
-        const session = getConversation(from);
+        const session = await getConversation(from);
 
         console.log("📥 Incoming message:", JSON.stringify(m, null, 2));
         console.log("📌 Session:", JSON.stringify(session));
@@ -253,8 +100,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
                 text.toLowerCase().includes(cmd)
               )
             ) {
-              resetConversation(from);
-              updateConversation(from, { step: "WAIT_SENDER_DETAILS" });
+              await resetConversation(from);
+              await updateConversation(from, { step: "WAIT_SENDER_DETAILS" });
               await sendText({
                 to: from,
                 body: "🚚 Let's book your delivery!\nPlease send:\nSender Name; Sender Phone; Recipient Name; Recipient Phone; Drop-off Address\n(separated by semi-colon)",
@@ -292,7 +139,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
                 continue;
               }
 
-              updateConversation(from, {
+              await updateConversation(from, {
                 step: "WAIT_VEHICLE",
                 sender_name,
                 sender_phone,
@@ -327,7 +174,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
               }
 
               const [order_details, pickup_location] = parts;
-              updateConversation(from, {
+              await updateConversation(from, {
                 step: "COMPLETE",
                 order_details,
                 pickup_location,
@@ -379,7 +226,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
               const btn = m.interactive.button_reply;
               if (btn && btn.id.startsWith("veh_")) {
                 const vehicle = btn.title as VehicleType;
-                updateConversation(from, {
+                await updateConversation(from, {
                   step: "WAIT_ORDER_DETAILS",
                   vehicle_type: vehicle,
                 });
@@ -405,7 +252,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
                   phoneNumberId,
                 });
                 console.log("These are the order details we have ", session);
-                resetConversation(from);
+                await archiveConversation(from);
+                await resetConversation(from);
                 continue;
               } else if (btn?.id === "cancel_booking") {
                 await sendText({
@@ -413,7 +261,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
                   body: "❌ Booking cancelled. Send 'book' to start again.",
                   phoneNumberId,
                 });
-                resetConversation(from);
+                await resetConversation(from);
                 continue;
               }
             }
