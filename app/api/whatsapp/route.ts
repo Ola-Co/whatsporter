@@ -2,7 +2,7 @@
 import crypto from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { isE164 } from "@/lib/validate";
-import { getTravelSeconds } from "@/lib/googleMaps";
+import { getTravelSeconds, validateAddress } from "@/lib/googleMaps";
 import { sendButtons, sendText } from "@/lib/whatsapphelper";
 import type { VehicleType } from "@/lib/types";
 import {
@@ -130,6 +130,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
                 destination_address,
               ] = parts;
 
+              // Validate the destination address using the Geocoding API
+              const isValidAddress = await validateAddress(
+                destination_address,
+                process.env.GOOGLE_MAPS_API_KEY ?? ""
+              );
+              if (!isValidAddress) {
+                await sendText({
+                  to: from,
+                  body: "⚠️ The address you provided seems invalid. Please try again with a valid address.",
+                  phoneNumberId,
+                });
+                continue;
+              }
+
               if (!isE164(sender_phone) || !isE164(recipient_phone)) {
                 await sendText({
                   to: from,
@@ -174,12 +188,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
               }
 
               const [order_details, pickup_location] = parts;
+
+              // Validate the destination address using the Geocoding API
+              const isValidAddress = await validateAddress(
+                pickup_location,
+                process.env.GOOGLE_MAPS_API_KEY ?? ""
+              );
+              if (!isValidAddress) {
+                await sendText({
+                  to: from,
+                  body: "⚠️ The address you provided seems invalid. Please try again with a valid address.",
+                  phoneNumberId,
+                });
+                continue;
+              }
+
               await updateConversation(from, {
                 step: "COMPLETE",
                 order_details,
                 pickup_location,
               });
-
               // Calculate quote
               const seconds = await getTravelSeconds(
                 pickup_location,

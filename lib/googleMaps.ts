@@ -36,3 +36,30 @@ export async function getTravelSeconds(
     return 0;
   }
 }
+export async function validateAddress(
+  address: string,
+  apiKey: string
+): Promise<boolean> {
+  try {
+    if (!address) throw new Error("No address provided");
+    if (!apiKey) throw new Error("Missing GOOGLE_MAPS_API_KEY");
+
+    const encAddress = encodeURIComponent(address);
+    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encAddress}&key=${apiKey}`;
+
+    const res = await fetch(url, { method: "GET" });
+    if (!res.ok) throw new Error(`Geocode HTTP ${res.status}`);
+
+    const data = await res.json();
+
+    if (data.status !== "OK" || !data.results?.length) {
+      throw new Error("Invalid address");
+    }
+
+    // If we get valid results, return true
+    return true;
+  } catch (err) {
+    console.error("Address validation error:", err);
+    return false;
+  }
+}
